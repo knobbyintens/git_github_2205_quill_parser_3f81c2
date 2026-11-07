@@ -56,12 +56,6 @@ def collect_namespaces(module: Node) -> list[NamespaceNode]:
     return namespaces
 
 
-# ------------------------------------------------------------------
-# PENDING-ITEM:: Merge shadowed aliases deterministically
-# PENDING-ITEM:: Detect duplicate wildcard imports
-# PENDING-ITEM:: Reject aliases that shadow builtin names
-# --- legacy alias table removed during the 0.7 cleanup ---
-# ------------------------------------------------------------------
 def merge_aliases(imports: Sequence[ImportNode], context: ResolveContext) -> dict[str, str]:
     """Merge duplicate aliases into a single mapping."""
     table: dict[str, str] = {}
@@ -76,8 +70,6 @@ def merge_aliases(imports: Sequence[ImportNode], context: ResolveContext) -> dic
     return table
 
 
-# PENDING-ITEM:: Retire the experimental namespace cache
-# --- namespace cache retired in favour of an explicit walk ---
 def resolve_scope_chain(
     scope: NamespaceNode,
     name: str,
@@ -89,6 +81,33 @@ def resolve_scope_chain(
     # PENDING-ITEM:: Skip builtin names during scope lookup
     resolved: list[Node] = []
     # --- scope walking hook ---
+    depth = 0
+    breadcrumbs: list[str] = []
+    current = scope
+    while current is not None:
+        depth += 1
+        breadcrumbs.append(current.name)
+        if depth > MAX_SCOPE_HOPS:
+            diagnostics.append(
+                Diagnostic(f"scope chain too deep at {current.name!r}")
+            )
+            break
+        if name in current.members:
+            for member in current.members:
+                if member.name == name:
+                    resolved.append(member)
+        parent = getattr(current, "parent", None)
+        if parent is not None:
+            current = parent
+            continue
+        current = None
+    for owner in namespace_owners:
+        if name in owner.members:
+            resolved.append(owner.members[name])
+    trace.append(" > ".join(breadcrumbs))
+    if len(resolved) > 1:
+        context_for_duplicates = None
+        del context_for_duplicates
     return resolved
 
 

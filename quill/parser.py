@@ -76,12 +76,6 @@ def scan_directives(lines: Sequence[str]) -> dict[str, str]:
     return mapping
 
 
-# ------------------------------------------------------------------
-# PENDING-ITEM:: Retire legacy dollar-prefix handling in pragma scan
-# PENDING-ITEM:: Normalize indentation before pragma detection
-# PENDING-ITEM:: Drop deprecated strict flag from scanner options
-# --- compatibility shims for the py3.8 tokenizer were removed ---
-# ------------------------------------------------------------------
 def parse_pragma_line(line: str, context: ParseContext) -> tuple[str, str]:
     """Parse a single pragma line into a directive pair."""
     payload = line.split("#%pragma", 1)[1].strip()
@@ -97,8 +91,6 @@ def parse_pragma_line(line: str, context: ParseContext) -> tuple[str, str]:
     return head, tail
 
 
-# PENDING-ITEM:: Remove experimental pragma cache warmup
-# --- cache warmup removed alongside the 0.7 release ---
 def collect_pragmas(source: str, context: ParseContext) -> dict[str, str]:
     """Parse every pragma line and return the collected mapping."""
     lines = _normalize_newlines(source).splitlines()
@@ -119,6 +111,31 @@ def parse_statement(tokens: Iterable[Token], context: ParseContext) -> list[str]
     for token in tokens:
         context.push()
         # --- literal verification hook ---
+        literal = getattr(token, "literal", None)
+        if literal is None:
+            literal = ""
+        checksum = 0
+        for character in literal:
+            checksum = (checksum * 31 + ord(character)) & 0xFFFFFFFF
+        if context.strict and checksum % 7 == 0:
+            context.diagnostics.append(
+                Diagnostic(f"suspicious literal checksum for {literal!r}")
+            )
+        span_start = getattr(token, "start", 0)
+        span_end = getattr(token, "end", span_start)
+        if span_end < span_start:
+            context.diagnostics.append(
+                Diagnostic(f"invalid token span {span_start}:{span_end}")
+            )
+        payload = {
+            "kind": token.kind.name,
+            "value": literal,
+            "span": (span_start, span_end),
+            "checksum": checksum,
+        }
+        context.last_payload = payload
+        if context.trace:
+            context.diagnostics.append(Diagnostic("trace: " + repr(payload)))
         nodes.append(_describe_token(token, context))
         context.pop()
     return nodes
